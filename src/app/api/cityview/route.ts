@@ -49,9 +49,10 @@ RULES:
 - Always include at least one briefing widget
 - Only include alert if the data genuinely supports it (Times Square gap, something breaking)
 - Choose widgets that SERVE THE QUERY. "Brooklyn?" → story_grid + borough_chart. "What's quiet?" → stat_row + borough_chart + pulse_feed. "What's breaking?" → alert + briefing + story_grid.
-- 3-6 widgets total is ideal. Never more than 8.
-- Write all prose in present tense, editorial voice, specific details from the data
-- Output ONLY the JSON array. Nothing else. No markdown.`
+- 3-5 widgets total. Never more than 6.
+- Keep ALL text SHORT: briefing content = max 2 sentences. story subtext = 1 short sentence. page_header subtitle = under 10 words.
+- Write in present tense, specific details from the data
+- Output ONLY the JSON array. Nothing else. No markdown, no comments.`
 }
 
 const FALLBACK: CityView = [
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
+      max_tokens: 1500,
       messages: [{ role: 'user', content: buildPrompt(query, events ?? []) }],
     })
 
@@ -77,9 +78,15 @@ export async function POST(req: NextRequest) {
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
 
     const parsed = JSON.parse(cleaned)
-    const validated = CityViewSchema.parse(parsed)
+    const result = CityViewSchema.safeParse(parsed)
 
-    return NextResponse.json(validated)
+    if (!result.success) {
+      console.error('CityView Zod validation failed:', JSON.stringify(result.error.issues, null, 2))
+      console.error('Raw Claude output was:', cleaned)
+      return NextResponse.json(FALLBACK)
+    }
+
+    return NextResponse.json(result.data)
   } catch (err) {
     console.error('CityView API error:', err)
     return NextResponse.json(FALLBACK)
