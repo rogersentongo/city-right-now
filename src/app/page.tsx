@@ -61,7 +61,9 @@ export default function CityRightNow() {
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [cityView, setCityView] = useState<CityView | null>(null)
   const [placeholderIdx, setPlaceholderIdx] = useState(0)
+  const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const time = useTimeString()
 
   // Live simulation state
@@ -100,12 +102,27 @@ export default function CityRightNow() {
     return () => clearInterval(id)
   }, [])
 
+  const cancelQuery = useCallback(() => {
+    abortRef.current?.abort()
+    setPageState('idle')
+    setError(null)
+  }, [])
+
   const submitQuery = useCallback(async (q: string) => {
     const trimmed = q.trim()
     if (!trimmed) return
 
+    // Cancel any in-flight request
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    // 20s timeout
+    const timeout = setTimeout(() => controller.abort(), 20000)
+
     setSubmittedQuery(trimmed)
     setPageState('loading')
+    setError(null)
     setCityView(null)
 
     try {
@@ -113,12 +130,21 @@ export default function CityRightNow() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: trimmed, events: MOCK_EVENTS }),
+        signal: controller.signal,
       })
       const data: CityView = await res.json()
       setCityView(data)
       setPageState('ready')
-    } catch {
-      setPageState('idle')
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // user cancelled — stay idle, no error
+        setPageState('idle')
+      } else {
+        setError('Could not reach the city. Check that the dev server is running.')
+        setPageState('idle')
+      }
+    } finally {
+      clearTimeout(timeout)
     }
   }, [])
 
@@ -136,6 +162,7 @@ export default function CityRightNow() {
     setPageState('idle')
     setQuery('')
     setCityView(null)
+    setError(null)
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
@@ -152,6 +179,14 @@ export default function CityRightNow() {
         </div>
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs text-white/30">{time}</span>
+          {pageState === 'loading' && (
+            <button
+              onClick={cancelQuery}
+              className="text-[10px] font-mono text-white/40 border border-white/10 rounded-lg px-2.5 py-1 hover:text-white/60 hover:border-red-500/30 hover:text-red-400 transition-colors"
+            >
+              ✕ stop
+            </button>
+          )}
           {pageState === 'ready' && (
             <button
               onClick={handleReset}
@@ -201,6 +236,13 @@ export default function CityRightNow() {
               transition={{ duration: 0.3 }}
               className="flex flex-col items-center px-6 pt-6 gap-6"
             >
+              {/* Error message */}
+              {error && (
+                <div className="w-full text-center text-[11px] font-mono text-red-400/70 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+                  {error}
+                </div>
+              )}
+
               {/* Example chips */}
               <div className="flex flex-wrap justify-center gap-2">
                 {EXAMPLE_CHIPS.map(chip => (
